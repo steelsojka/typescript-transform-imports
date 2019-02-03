@@ -11,7 +11,7 @@ export interface ImportFileTransformOptions {
 export function create(options: ImportFileTransformOptions = {}): ts.TransformerFactory<ts.SourceFile> {
   Object.keys(options).forEach(key => {
     options[key] = {
-      writePath: (prop: string) => ({ path: `${key}/${prop}`, isNamed: true }),
+      writePath: (prop: string) => ({ path: `${key}/${prop}` }),
       writeIdentifier: prop => `__${key}_${prop}`,
       ...options[key]
     };
