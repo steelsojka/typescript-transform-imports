@@ -16,7 +16,7 @@ Usage
 This can transform imports to become better tree shakable. Take lodash for example.
 
 ```typescript
-// This will import all of lodash... Looks not but it pretty large in size.
+// This will import all of lodash... Looks nice, but it's pretty large in size.
 import * as _ from 'lodash';
 
 const value = _.add(10, _.subtract(10, 5));
@@ -25,7 +25,7 @@ const value = _.add(10, _.subtract(10, 5));
 This will be transformed to this.
 
 ```typescript
-// This will import all of lodash... Looks not but it pretty large in size.
+// Only import the parts we care about.
 import __add from 'lodash/add';
 import __subtract from 'lodash/subtract';
 
@@ -43,12 +43,12 @@ import { create } from 'typescript-transform-imports';
 const importTransformer = create({
   lodash: {
     match: /^lodash$/,
-    writePath: prop => ({ path: `lodash/${prop}` }) // Optional
+    writePath: prop => ({ path: `lodash/${prop}` }), // Optional
     writeIdentifier: prop => `__${prop}` // Optional
   },
   lodashFp: {
     match: /^lodash\/fp$/,
-    writePath: prop => ({ path: `lodash/fp/${prop}` }) // Optional
+    writePath: prop => ({ path: `lodash/fp/${prop}` }), // Optional
     writeIdentifier: prop => `__fp_${prop}` // Optional
   }
 });
@@ -89,7 +89,7 @@ const importTransformer = create({
     // isNamed -> import { add as __add } from 'lodash/add';
     // isStar -> import * as __add from 'lodash/add';
     // default -> import __add from 'lodash/add';
-    writePath: prop => ({ path: `lodash/${prop}`, isNamed: true })
+    writePath: prop => ({ path: `lodash/${prop}`, isNamed: true }),
     // Gets the identifier to write when used from a star import.
     // _.add() would write to __add__()
     writeIdentifier: prop => `__${prop}__`
