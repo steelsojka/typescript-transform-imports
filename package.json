@@ -1,17 +1,22 @@
 {
-  "name": "typescript-transform-star-import",
+  "name": "typescript-transform-imports",
   "version": "1.0.0",
-  "description": "",
+  "description": "A typescript transform for transforming imports.",
   "main": "index.js",
   "scripts": {
-    "test": "ts-node src/index.spec.ts"
+    "test": "mocha --require ts-node/register src/index.spec.ts",
+    "build": "tsc"
   },
-  "author": "",
+  "author": "Steven Sojka",
   "license": "MIT",
   "dependencies": {
     "typescript": "^3.2.4"
   },
   "devDependencies": {
+    "@types/chai": "^4.1.7",
+    "@types/mocha": "^5.2.5",
+    "chai": "^4.2.0",
+    "mocha": "^5.2.0",
     "ts-node": "^8.0.2"
   }
 }

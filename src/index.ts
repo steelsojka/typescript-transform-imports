@@ -1,13 +1,14 @@
 import * as ts from 'typescript';
 
-export interface StarImportFileTransformOptions {
+export interface ImportFileTransformOptions {
   [key: string]: {
+    match: RegExp | ((path: string, node: ts.ImportClause) => boolean);
     writeIdentifier?: (prop: string) => string;
-    writePath?: (prop: string) => { path: string, isNamed: boolean; };
+    writePath?: (prop: string) => { path: string, isNamed?: boolean; isStar?: boolean; };
   };
 }
 
-export function create(options: StarImportFileTransformOptions = {}): ts.TransformerFactory<ts.SourceFile> {
+export function create(options: ImportFileTransformOptions = {}): ts.TransformerFactory<ts.SourceFile> {
   Object.keys(options).forEach(key => {
     options[key] = {
       writePath: (prop: string) => ({ path: `${key}/${prop}`, isNamed: true }),
@@ -16,135 +17,191 @@ export function create(options: StarImportFileTransformOptions = {}): ts.Transfo
     };
   })
 
-  return (context: ts.TransformationContext) => sourceNode => new StarImportFileTransformer(context, sourceNode, options).transform();
+  return (context: ts.TransformationContext) => sourceNode => new ImportFileTransformer(context, sourceNode, options).transform();
 }
 
-export class StarImportFileTransformer {
+export class ImportFileTransformer {
   constructor(
     private context: ts.TransformationContext,
     private sourceNode: ts.SourceFile,
-    private options: StarImportFileTransformOptions
+    private options: ImportFileTransformOptions
   ) {}
 
   transform(): ts.SourceFile{
-    const usageTransformer = new StarImportUsageTransformer(this.context, this.sourceNode, this.options);
+    const usageTransformer = new ImportUsageTransformer(this.context, this.sourceNode, this.options);
     const sourceFile = usageTransformer.transform();
 
     return ts.visitNode(sourceFile, node => this.visitor(node, usageTransformer));
   }
 
-  private visitor(node: ts.Node, usageTransformer: StarImportUsageTransformer): ts.VisitResult<ts.Node> {
+  private visitor(node: ts.Node, usageTransformer: ImportUsageTransformer): ts.VisitResult<ts.Node> {
     if (ts.isImportDeclaration(node)
       && ts.isStringLiteral(node.moduleSpecifier)
-      && usageTransformer.hasPackage(node.moduleSpecifier.text)
+      && usageTransformer.hasMatch(node.moduleSpecifier.text)
     ) {
       const packageName = node.moduleSpecifier.text;
-      const pack = usageTransformer.getPackage(packageName);
-      const { writePath, writeIdentifier } = this.options[packageName]!;
+      const pack = usageTransformer.getMatch(packageName);
+      const { writePath, writeIdentifier } = this.options[pack.matcherName]!;
 
-      return pack.usages.map(prop => {
-        const pathDef = writePath!(prop);
-        const importClause = pathDef.isNamed
-          ? ts.createImportClause(undefined,
-              ts.createNamedImports([
-                ts.createImportSpecifier(
-                  ts.createIdentifier(prop),
-                  ts.createIdentifier(writeIdentifier!(prop)))
-              ]))
-          : ts.createImportClause(ts.createIdentifier(writeIdentifier!(prop)), undefined);
+      return [
+        ...pack.usages.map(prop => {
+          const pathDef = writePath!(prop);
 
-        return ts.createImportDeclaration(
-          undefined,
-          undefined,
-          importClause,
-          ts.createStringLiteral(pathDef.path));
-      });
+          return ts.createImportDeclaration(
+            undefined,
+            undefined,
+            this.getImportClause(pathDef, prop, writeIdentifier!, true),
+            ts.createStringLiteral(pathDef.path));
+        }),
+        ...pack.namedImports.map(specifier => {
+          const prop = specifier.propertyName
+            ? specifier.propertyName.text
+            : specifier.name.text;
+          const pathDef = writePath!(prop);
+
+          return ts.createImportDeclaration(
+            undefined,
+            undefined,
+            this.getImportClause(pathDef, prop, () => prop),
+            ts.createStringLiteral(pathDef.path));
+        })
+      ];
     }
 
     return ts.visitEachChild(node, n => this.visitor(n, usageTransformer), this.context);
   }
+
+  private getImportClause(
+    pathDef: ReturnType<NonNullable<ImportFileTransformOptions['']['writePath']>>,
+    prop: string,
+    writeIdentifier: NonNullable<ImportFileTransformOptions['']['writeIdentifier']>,
+    alias: boolean = false
+  ): ts.ImportClause {
+    if (pathDef.isNamed) {
+      return ts.createImportClause(undefined,
+        ts.createNamedImports([
+          ts.createImportSpecifier(
+            alias ? ts.createIdentifier(prop) : undefined,
+            ts.createIdentifier(writeIdentifier(prop)))
+        ]));
+    } else if (pathDef.isStar) {
+      return ts.createImportClause(undefined,
+        ts.createNamespaceImport(
+          ts.createIdentifier(
+            writeIdentifier(prop))));
+    } else {
+      return ts.createImportClause(ts.createIdentifier(writeIdentifier(prop)), undefined);
+    }
+  }
+
+  static isMatch(matcher: RegExp | ((path: string, node: ts.ImportClause) => boolean), path: string, node: ts.ImportClause): boolean {
+    return matcher instanceof RegExp ? matcher.test(path) : matcher(path, node);
+  }
 }
 
-export class StarImportUsageTransformer {
-  private packages: {
+export class ImportUsageTransformer {
+  private matches: {
     [key: string]: {
-      hasStarImport: boolean;
-      starImportAs: string;
+      matcherName: string;
+      importAlias: string;
       usages: string[];
-      identifier: (prop: string) => string;
+      namedImports: ts.ImportSpecifier[];
     }
   } = {};
 
   private packageAliasToName: { [key: string]: string } = {};
-  private packageNames: string[] = [];
-  private importAs: string[] = [];
+  private matchNames: string[] = [];
+  private importAliasNames: string[] = [];
 
   constructor(
     private context: ts.TransformationContext,
     private sourceNode: ts.SourceFile,
-    private options: StarImportFileTransformOptions
-  ) {
-    Object.keys(this.options).forEach(key => {
-      this.packages[key] = {
-        hasStarImport: false,
-        starImportAs: '',
-        usages: [],
-        identifier: this.options[key].writeIdentifier!
-      };
-    });
-
-    this.packageNames = Object.keys(this.packages);
-  }
+    private options: ImportFileTransformOptions
+  ) {}
 
   transform(): ts.SourceFile {
     return ts.visitNode(this.sourceNode, node => this.visitor(node));
   }
 
-  getPackage(name: string): StarImportUsageTransformer['packages'][''] {
-    return this.packages[name];
+  getMatch(name: string): ImportUsageTransformer['matches'][''] {
+    return this.matches[name];
   }
 
-  getPackageByAlias(alias: string): StarImportUsageTransformer['packages'][''] {
-    return this.packages[this.packageAliasToName[alias]];
+  getMatchByAlias(alias: string): ImportUsageTransformer['matches'][''] {
+    return this.matches[this.packageAliasToName[alias]];
   }
 
-  hasPackage(name: string): boolean {
-    return this.packageNames.indexOf(name) !== -1;
+  hasMatch(name: string): boolean {
+    return this.matchNames.indexOf(name) !== -1;
   }
 
-  private setPackageImportAs(name: string, as: string): void {
-    this.packages[name].starImportAs = as;
-    this.packages[name].hasStarImport = true;
-    this.importAs.push(as);
+  private setImportAliasForImport(name: string, as: string): void {
+    this.matches[name].importAlias = as;
+    this.importAliasNames.push(as);
     this.packageAliasToName[as] = name;
   }
 
   private isImportAlias(name: string): boolean {
-    return this.importAs.indexOf(name) !== -1;
+    return this.importAliasNames.indexOf(name) !== -1;
+  }
+
+  private initMatch(name: string, matcherName: string): void {
+    this.matchNames.push(name);
+    this.matches[name] = {
+      matcherName,
+      usages: [],
+      importAlias: '',
+      namedImports: [] as ts.ImportSpecifier[]
+    };
   }
 
   private visitor(node: ts.Node): ts.VisitResult<ts.Node> {
     if (ts.isImportDeclaration(node)
       && ts.isStringLiteral(node.moduleSpecifier)
-      && this.hasPackage(node.moduleSpecifier.text)
       && node.importClause
-      && node.importClause.namedBindings
-      && ts.isNamespaceImport(node.importClause.namedBindings)
     ) {
-      this.setPackageImportAs(node.moduleSpecifier.text, node.importClause.namedBindings.name.text);
+      for (const name of Object.keys(this.options)) {
+        const entry = this.options[name];
+
+        if (ImportFileTransformer.isMatch(entry.match, node.moduleSpecifier.text, node.importClause!)) {
+          this.initMatch(node.moduleSpecifier.text, name);
+
+          if (node.importClause.namedBindings) {
+            if (ts.isNamespaceImport(node.importClause.namedBindings)) {
+              this.setImportAliasForImport(node.moduleSpecifier.text, node.importClause.namedBindings.name.text);
+            } else if (ts.isNamedImports(node.importClause.namedBindings)) {
+              this.matches[node.moduleSpecifier.text].namedImports = [ ...(node.importClause.namedBindings as ts.NamedImports).elements ];
+            }
+          }
+
+          if (node.importClause.name) {
+            this.setImportAliasForImport(node.moduleSpecifier.text, node.importClause.name.text);
+          }
+
+          break;
+        }
+      }
     }
 
     if (ts.isPropertyAccessExpression(node)
       && ts.isIdentifier(node.expression)
       && this.isImportAlias(node.expression.text)
     ) {
-      const pack = this.getPackageByAlias(node.expression.text);
-
-      pack.usages.push(node.name.text);
-
-      return ts.createIdentifier(pack.identifier(node.name.text));
+      return this.addUsage(node.expression.text, node.name.text);
     }
 
     return ts.visitEachChild(node, n => this.visitor(n), this.context);
+  }
+
+  private addUsage(matchName: string, name: string): ts.Identifier {
+    const pack = this.getMatchByAlias(matchName);
+    const match = this.options[pack.matcherName];
+    const hasNamedImport = pack.namedImports.some(imp => imp.name.text === name);
+
+    if (pack.usages.indexOf(name) === -1 && !hasNamedImport) {
+      pack.usages.push(name);
+    }
+
+    return ts.createIdentifier(hasNamedImport ? name : match.writeIdentifier!(name));
   }
 }
