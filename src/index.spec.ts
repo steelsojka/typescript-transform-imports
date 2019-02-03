@@ -194,6 +194,96 @@ const cases: {
       ''
     ].join('\n')
   } ]
+}, {
+  title: 'named alias imports',
+  src: `
+  import { add as _add, subtract as _subtract } from 'lodash';
+
+  export function(a: number): number {
+    return _add(a, _subtract(5, 10));
+  }`,
+  tests: [ {
+    when: 'outputting default import',
+    expect: [
+      'import _add from "lodash/add";',
+      'import _subtract from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(a, _subtract(5, 10));',
+      '}',
+      ''
+    ].join('\n')
+  }, {
+    when: 'outputting named import',
+    options: {
+      writePath: path => ({ path: `lodash/${path}`, isNamed: true })
+    },
+    expect: [
+      'import { add as _add } from "lodash/add";',
+      'import { subtract as _subtract } from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(a, _subtract(5, 10));',
+      '}',
+      ''
+    ].join('\n')
+  }, {
+    when: 'outputting star imports',
+    options: {
+      writePath: path => ({ path: `lodash/${path}`, isStar: true })
+    },
+    expect: [
+      'import * as _add from "lodash/add";',
+      'import * as _subtract from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(a, _subtract(5, 10));',
+      '}',
+      ''
+    ].join('\n')
+  } ]
+}, {
+  title: 'named alias imports with defaults',
+  src: `
+  import _, { add as _add, subtract as _subtract } from 'lodash';
+
+  export function(a: number): number {
+    return _.add(_add(a, _subtract(5, 10)), 5);
+  }`,
+  tests: [ {
+    when: 'outputting default import',
+    expect: [
+      'import _add from "lodash/add";',
+      'import _subtract from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(_add(a, _subtract(5, 10)), 5);',
+      '}',
+      ''
+    ].join('\n')
+  }, {
+    when: 'outputting named import',
+    options: {
+      writePath: path => ({ path: `lodash/${path}`, isNamed: true })
+    },
+    expect: [
+      'import { add as _add } from "lodash/add";',
+      'import { subtract as _subtract } from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(_add(a, _subtract(5, 10)), 5);',
+      '}',
+      ''
+    ].join('\n')
+  }, {
+    when: 'outputting star imports',
+    options: {
+      writePath: path => ({ path: `lodash/${path}`, isStar: true })
+    },
+    expect: [
+      'import * as _add from "lodash/add";',
+      'import * as _subtract from "lodash/subtract";',
+      'export function (a: number): number {',
+      '    return _add(_add(a, _subtract(5, 10)), 5);',
+      '}',
+      ''
+    ].join('\n')
+  } ]
 } ]
 
 cases.forEach(t => {

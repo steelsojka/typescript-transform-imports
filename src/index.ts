@@ -54,6 +54,7 @@ export class ImportFileTransformer {
             ts.createStringLiteral(pathDef.path));
         }),
         ...pack.namedImports.map(specifier => {
+          const alias = specifier.propertyName && specifier.name.text;
           const prop = specifier.propertyName
             ? specifier.propertyName.text
             : specifier.name.text;
@@ -62,7 +63,7 @@ export class ImportFileTransformer {
           return ts.createImportDeclaration(
             undefined,
             undefined,
-            this.getImportClause(pathDef, prop, () => prop),
+            this.getImportClause(pathDef, prop, () => alias || prop, Boolean(alias)),
             ts.createStringLiteral(pathDef.path));
         })
       ];
@@ -196,12 +197,26 @@ export class ImportUsageTransformer {
   private addUsage(matchName: string, name: string): ts.Identifier {
     const pack = this.getMatchByAlias(matchName);
     const match = this.options[pack.matcherName];
-    const hasNamedImport = pack.namedImports.some(imp => imp.name.text === name);
+    let namedImport: ts.ImportSpecifier | null = null;
+    let namedImportName: string = '';
 
-    if (pack.usages.indexOf(name) === -1 && !hasNamedImport) {
+    for (const imp of pack.namedImports) {
+      const impName = imp.propertyName
+        ? imp.propertyName.text
+        : imp.name.text;
+
+      if (impName === name) {
+        namedImport = imp;
+        namedImportName = imp.name.text;
+
+        break;
+      }
+    }
+
+    if (pack.usages.indexOf(name) === -1 && !namedImport) {
       pack.usages.push(name);
     }
 
-    return ts.createIdentifier(hasNamedImport ? name : match.writeIdentifier!(name));
+    return ts.createIdentifier(namedImportName ? namedImportName : match.writeIdentifier!(name));
   }
 }
